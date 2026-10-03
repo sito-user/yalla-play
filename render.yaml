@@ -1,0 +1,9 @@
+# Configuration Render (offre gratuite) : un seul service web qui sert le site et le serveur Socket.io
+services:
+  - type: web
+    name: yalla-play
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
