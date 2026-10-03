@@ -440,6 +440,15 @@ const WINNER_LABEL = {
   white: 'Mr. White a deviné le mot !'
 };
 
+// Pourquoi la partie s'arrête, en une phrase
+function endReason(s) {
+  if (s.winner === 'white') return 'Il a trouvé le mot des civils après avoir été démasqué.';
+  if (s.winner === 'civils') return 'Tous les infiltrés ont été démasqués.';
+  return s.civilsLeft === 1
+    ? 'Il ne reste plus qu\'un civil : il ne peut plus faire éliminer les infiltrés.'
+    : 'Il ne reste plus assez de civils pour faire éliminer les infiltrés.';
+}
+
 function setupInfo(s) {
   return `${s.count} joueur${s.count > 1 ? 's' : ''} : ${s.undercovers} Undercover${s.white ? ' + Mr. White' : ''}`;
 }
@@ -534,13 +543,18 @@ views.undercover = {
     return html + deadList(s);
   },
 
-  results: s => `<div class="winner-card winner-${s.winner}"><p>${WINNER_LABEL[s.winner]}</p></div>
+  results: s => `${s.lastOut ? `<div class="elim-card">
+        <p class="elim-name">${esc(s.lastOut.name)} est éliminé(e)</p>
+        <p class="elim-role">C'était : <span class="role-tag role-${s.lastOut.role}">${ROLE_LABEL[s.lastOut.role]}</span></p>
+      </div>` : ''}
+    <div class="winner-card winner-${s.winner}"><p>${WINNER_LABEL[s.winner]}</p>
+      <p class="winner-why">${endReason(s)}</p></div>
     <p class="words-line">Mot des civils : <strong>${esc(s.civilWord)}</strong><br>
       Mot de l'Undercover : <strong>${esc(s.underWord)}</strong></p>
     ${s.whiteGuess ? `<p class="status">Mr. White a proposé « ${esc(s.whiteGuess)} »</p>` : ''}
     <h3>Les rôles</h3>
     <ul class="player-list">${s.roles.map(p => `
-      <li><span class="pname">${esc(p.name)}</span>
+      <li class="${p.alive ? '' : 'out'}"><span class="pname">${esc(p.name)}${p.alive ? '' : ' <small>éliminé(e)</small>'}</span>
         <span class="role-tag role-${p.role}">${ROLE_LABEL[p.role]}</span>
         <span class="score">${p.gain ? '+' + p.gain : ''}</span></li>`).join('')}</ul>`
 };

@@ -329,6 +329,9 @@ body[data-game="bluff"] .expression { color: var(--ink); }
 
 .winner-card { border-radius: 8px; padding: 18px 16px; margin-bottom: 14px; color: var(--white); }
 .winner-card p { margin: 0; font-size: 1.5rem; font-weight: 800; }
+.winner-card .winner-why { margin-top: 4px; font-size: .95rem; font-weight: 500; opacity: .9; }
+.player-list li.out .pname { color: var(--muted); }
+.player-list li.out small { font-size: .8rem; }
 .winner-civils { background: var(--good); }
 .winner-infiltres { background: var(--bad); }
 .winner-white { background: var(--ink); }

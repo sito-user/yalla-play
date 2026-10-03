@@ -671,7 +671,10 @@ const games = {
       const guess = clean(text, 40);
       if (!guess) return;
       r.whiteGuess = guess;
-      if (normalizeWord(guess) === normalizeWord(r.civilWord)) return this.endGame(room, 'white');
+      if (normalizeWord(guess) === normalizeWord(r.civilWord)) {
+        r.lastOut = r.eliminated;
+        return this.endGame(room, 'white');
+      }
       this.afterElimination(room);
     },
 
@@ -688,7 +691,10 @@ const games = {
     afterElimination(room) {
       const r = room.round;
       const w = this.winner(room);
-      if (w) return this.endGame(room, w);
+      if (w) {
+        r.lastOut = r.eliminated; // l'élimination qui termine la partie, affichée sur l'écran de fin
+        return this.endGame(room, w);
+      }
       r.phase = 'reveal';
       sendState(room);
     },
@@ -761,6 +767,8 @@ const games = {
       return {
         ...base,
         winner: r.winner,
+        lastOut: r.lastOut || null,
+        civilsLeft: r.alive.filter(id => r.roles[id] === 'civil').length,
         civilWord: r.civilWord,
         underWord: r.underWord,
         whiteGuess: r.whiteGuess,
