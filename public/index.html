@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4EFE6">
+  <title>Yalla Play</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+
+    <!-- Accueil -->
+    <section id="screen-home" class="screen active">
+      <header class="brand">
+        <h1 class="logo">Yalla <span>Play</span></h1>
+        <p class="tagline">Des petits jeux entre potes. Chacun joue sur son téléphone.</p>
+      </header>
+
+      <div class="field">
+        <label for="name">Ton prénom</label>
+        <input id="name" type="text" maxlength="20" placeholder="ex : Rami" autocomplete="off">
+      </div>
+
+      <button id="btn-create" class="btn btn-primary">Créer une partie</button>
+
+      <div class="divider"><span>ou rejoindre tes potes</span></div>
+
+      <div class="field">
+        <label for="code">Code de la partie</label>
+        <input id="code" type="text" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters" class="code-input">
+      </div>
+      <button id="btn-join" class="btn btn-secondary">Rejoindre</button>
+    </section>
+
+    <!-- Lobby / choix du jeu -->
+    <section id="screen-lobby" class="screen">
+      <div class="room-code">
+        <span>Code de la partie</span>
+        <strong id="room-code"></strong>
+      </div>
+
+      <div id="host-menu" class="hidden">
+        <h2>Choisis un jeu</h2>
+        <div class="game-list">
+          <button class="game-btn" data-game="whois"><span class="num">1</span><span class="game-text"><span class="game-name">Yalla, Qui ?</span><span class="game-desc">Votez pour celui qui correspond le mieux</span></span></button>
+          <button class="game-btn" data-game="assoc"><span class="num">2</span><span class="game-text"><span class="game-name">Yalla Vite</span><span class="game-desc">Un thème, 12 secondes pour répondre</span></span></button>
+          <button class="game-btn" data-game="bluff"><span class="num">3</span><span class="game-text"><span class="game-name">Sa7 ou Fake</span><span class="game-desc">Trouve la vraie réponse, piège les autres</span></span></button>
+          <button class="game-btn" data-game="traduis"><span class="num">4</span><span class="game-text"><span class="game-name">Yalla, Traduis !</span><span class="game-desc">Le quiz des expressions libanaises</span></span></button>
+          <button class="game-btn" data-game="bottle"><span class="num">5</span><span class="game-text"><span class="game-name">Yalla, Tourne !</span><span class="game-desc">La bouteille pour action ou vérité</span></span></button>
+          <button class="game-btn" data-game="undercover"><span class="num">6</span><span class="game-text"><span class="game-name">Undercover</span><span class="game-desc">Trouve qui n'a pas le même mot que toi</span></span></button>
+        </div>
+      </div>
+      <p id="guest-wait" class="waiting hidden">L'hôte choisit le prochain jeu…</p>
+
+      <h3>Joueurs</h3>
+      <ul id="lobby-players" class="player-list"></ul>
+    </section>
+
+    <!-- Jeu en cours (contenu généré par client.js selon le jeu et la phase) -->
+    <section id="screen-game" class="screen">
+      <div class="game-header">
+        <span id="game-title" class="game-title"></span>
+        <span id="timer" class="timer hidden"></span>
+      </div>
+      <div id="game-body"></div>
+      <div id="host-controls" class="host-controls hidden">
+        <button id="btn-next" class="btn btn-primary hidden">Round suivant</button>
+        <button id="btn-menu" class="btn btn-ghost">Retour au menu</button>
+      </div>
+      <details class="scores">
+        <summary>Voir les scores</summary>
+        <ul id="game-players" class="player-list"></ul>
+      </details>
+    </section>
+
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
