@@ -55,8 +55,10 @@ function pick(room, game, list) {
 }
 
 const nameOf = (room, id) => (room.players[id] ? room.players[id].name : '(parti)');
-// Undercover : 1 infiltré jusqu'à 6 joueurs, 2 à partir de 7
+// Chou Kelmtak ? : 1 El Gharib jusqu'à 6 joueurs, 2 à partir de 7
 const undercoverCount = n => (n >= 7 ? 2 : 1);
+// Nombre minimum de tours de descriptions rappelé avant chaque vote
+const UNDERCOVER_MIN_TURNS = 3;
 // Compare deux mots sans tenir compte des majuscules, accents, espaces et tirets
 const normalizeWord = w => String(w).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 // "A, B et C"
@@ -496,10 +498,10 @@ const games = {
       sendState(room);
     },
 
-    // N'importe qui peut demander une idée (ou une autre) pour l'action/vérité en cours
-    idea(room) {
+    // Seul l'hôte peut demander une idée (ou une autre) pour l'action/vérité en cours
+    idea(room, socket) {
       const r = room.round;
-      if (r.phase !== 'ready' || !r.choice) return;
+      if (r.phase !== 'ready' || !r.choice || room.hostId !== socket.id) return;
       r.idea = pick(room, `bottle-${r.choice}`, Q.bottle[r.choice]);
       sendState(room);
     },
@@ -528,8 +530,9 @@ const games = {
     }
   },
 
-  // Undercover — civils (même mot), Undercover (mot proche), Mr. White optionnel (aucun mot).
-  // Les descriptions se font à l'oral ; le téléphone gère les mots secrets, l'ordre de parole et les votes.
+  // Chou Kelmtak ? (id interne "undercover") — civils (même mot), El Gharib (mot proche),
+  // El Shabah optionnel (aucun mot). Les descriptions se font à l'oral, au moins 3 tours avant
+  // chaque vote ; le téléphone gère les mots secrets, l'ordre de parole et les votes.
   undercover: {
     start(room) {
       const r = room.round;
@@ -551,7 +554,7 @@ const games = {
       const players = Object.keys(room.players);
       const n = players.length;
       const min = r.white ? 4 : 3;
-      if (n < min) return socket.emit('toast', `Il faut au moins ${min} joueurs${r.white ? ' avec Mr. White' : ''}.`);
+      if (n < min) return socket.emit('toast', `Il faut au moins ${min} joueurs${r.white ? ' avec El Shabah' : ''}.`);
 
       const nbUnder = undercoverCount(n);
       const shuffled = shuffle(players);
@@ -566,7 +569,7 @@ const games = {
       r.turn = 0;
       r.history = []; // éliminations successives
 
-      // Chaque joueur reçoit son mot en privé (l'Undercover ne sait pas qu'il l'est)
+      // Chaque joueur reçoit son mot en privé (El Gharib ne sait pas qu'il l'est)
       players.forEach(id => {
         const role = r.roles[id];
         io.to(id).emit('undercover-secret', role === 'white' ? { white: true } : { word: role === 'civil' ? r.civilWord : r.underWord });
@@ -580,36 +583,27 @@ const games = {
       return r.alive;
     },
 
+    // Nouvelle manche : un ordre de parole tiré au sort, gardé pour les 3 tours de descriptions
     startDescribe(room) {
       const r = room.round;
       const alive = this.aliveNow(room);
       r.turn++;
       r.order = shuffle(alive);
-      // Mr. White ne parle jamais en premier
+      // El Shabah ne parle jamais en premier
       if (r.roles[r.order[0]] === 'white' && r.order.length > 1) {
         const j = 1 + Math.floor(Math.random() * (r.order.length - 1));
         [r.order[0], r.order[j]] = [r.order[j], r.order[0]];
       }
-      r.speaker = 0;
       r.notice = null;
       r.phase = 'describe';
       sendState(room);
     },
 
-    spoke(room, socket) {
+    // L'hôte lance le vote quand les tours de descriptions sont faits
+    toVote(room, socket) {
       const r = room.round;
-      if (r.phase !== 'describe') return;
-      if (socket.id !== r.order[r.speaker] && socket.id !== room.hostId) return;
-      r.speaker++;
-      this.advance(room);
-    },
-
-    // Saute les joueurs partis ; passe au vote quand tout le monde a parlé
-    advance(room) {
-      const r = room.round;
-      while (r.speaker < r.order.length && !room.players[r.order[r.speaker]]) r.speaker++;
-      if (r.speaker >= r.order.length) return this.startVote(room, this.aliveNow(room), false);
-      sendState(room);
+      if (r.phase !== 'describe' || room.hostId !== socket.id) return;
+      this.startVote(room, this.aliveNow(room), false);
     },
 
     startVote(room, candidates, tie) {
@@ -678,13 +672,14 @@ const games = {
       this.afterElimination(room);
     },
 
+    // Les civils gagnent quand tous les infiltrés sont éliminés ; les infiltrés gagnent
+    // quand il ne reste plus que 2 joueurs dont au moins un infiltré. Sinon on continue.
     winner(room) {
       const r = room.round;
       const alive = this.aliveNow(room);
       const infiltrated = alive.filter(id => r.roles[id] !== 'civil').length;
-      const civils = alive.length - infiltrated;
       if (infiltrated === 0) return 'civils';
-      if (civils <= 1) return 'infiltres';
+      if (alive.length <= 2) return 'infiltres';
       return null;
     },
 
@@ -731,7 +726,10 @@ const games = {
         const w = this.winner(room);
         if (w) return this.endGame(room, w);
       }
-      if (r.phase === 'describe') return this.advance(room);
+      if (r.phase === 'describe') {
+        r.order = r.order.filter(id => room.players[id]); // un joueur parti sort de l'ordre de parole
+        return sendState(room);
+      }
       if (r.phase === 'vote') {
         const voters = this.aliveNow(room);
         if (voters.length && voters.every(id => id in r.votes)) return this.tally(room);
@@ -757,7 +755,7 @@ const games = {
         notice: r.notice
       };
       if (r.phase === 'describe') {
-        return { ...base, order: r.order.map(seat), speaker: r.order[r.speaker] };
+        return { ...base, order: r.order.map(seat), minTurns: UNDERCOVER_MIN_TURNS };
       }
       if (r.phase === 'vote') {
         return { ...base, candidates: r.candidates.map(seat), voted: Object.keys(r.votes), tie: r.tie };
@@ -856,11 +854,11 @@ io.on('connection', socket => {
   socket.on('bottle-spin', forRound('bottle', () => games.bottle.spin(room, socket)));
   socket.on('undercover-option', forRound('undercover', d => games.undercover.setOption(room, socket, d.white)));
   socket.on('undercover-deal', forRound('undercover', () => games.undercover.deal(room, socket)));
-  socket.on('undercover-spoke', forRound('undercover', () => games.undercover.spoke(room, socket)));
+  socket.on('undercover-tovote', forRound('undercover', () => games.undercover.toVote(room, socket)));
   socket.on('undercover-vote', forRound('undercover', d => games.undercover.vote(room, socket, d.targetId)));
   socket.on('undercover-guess', forRound('undercover', d => games.undercover.whiteGuess(room, socket, d.text)));
   socket.on('undercover-next', forRound('undercover', () => games.undercover.next(room, socket)));
-  socket.on('bottle-idea', forRound('bottle', () => games.bottle.idea(room)));
+  socket.on('bottle-idea', forRound('bottle', () => games.bottle.idea(room, socket)));
   socket.on('bottle-choose', forRound('bottle', d => games.bottle.choose(room, socket, d.choice)));
   socket.on('traduis-config', forRound('traduis', d => games.traduis.config(room, socket, d.count)));
   socket.on('traduis-answer', forRound('traduis', d => games.traduis.answer(room, socket, d.index)));

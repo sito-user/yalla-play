@@ -9,7 +9,7 @@ const GAME_NAMES = {
   bluff: 'Sa7 ou Fake',
   traduis: 'Yalla, Traduis !',
   bottle: 'Yalla, Tourne !',
-  undercover: 'Undercover'
+  undercover: 'Chou Kelmtak ?'
 };
 
 // La bouteille, goulot vers le haut (la rotation se fait autour de son centre)
@@ -136,7 +136,7 @@ socket.on('state', s => {
   renderGame();
 });
 
-// Undercover : mot secret envoyé uniquement à ce joueur
+// Chou Kelmtak ? : mot secret envoyé uniquement à ce joueur
 socket.on('undercover-secret', secret => {
   local.secret = secret;
   local.showWord = false;
@@ -369,7 +369,7 @@ views.bottle = {
           <p class="idea-text">${esc(s.idea)}</p>
         </div>`;
       }
-      html += `<button id="idea" class="btn idea-btn">${s.idea ? 'Une autre idée' : 'Donne-moi une idée'}</button>`;
+      if (isHost()) html += `<button id="idea" class="btn idea-btn">${s.idea ? 'Une autre idée' : 'Donne-moi une idée'}</button>`;
     }
     html += bottleTable(s);
     if (s.circle.length < 2) {
@@ -431,26 +431,24 @@ function bindBottle(s) {
   }
 }
 
-// ---------- Undercover ----------
+// ---------- Chou Kelmtak ? (id interne "undercover") ----------
 
-const ROLE_LABEL = { civil: 'Civil', undercover: 'Undercover', white: 'Mr. White' };
+const ROLE_LABEL = { civil: 'Civil', undercover: 'El Gharib', white: 'El Shabah' };
 const WINNER_LABEL = {
   civils: 'Les civils ont gagné !',
   infiltres: 'Les infiltrés ont gagné !',
-  white: 'Mr. White a deviné le mot !'
+  white: 'El Shabah a deviné le mot !'
 };
 
 // Pourquoi la partie s'arrête, en une phrase
 function endReason(s) {
   if (s.winner === 'white') return 'Il a trouvé le mot des civils après avoir été démasqué.';
   if (s.winner === 'civils') return 'Tous les infiltrés ont été démasqués.';
-  return s.civilsLeft === 1
-    ? 'Il ne reste plus qu\'un civil : il ne peut plus faire éliminer les infiltrés.'
-    : 'Il ne reste plus assez de civils pour faire éliminer les infiltrés.';
+  return 'Il ne reste plus que 2 joueurs : les infiltrés ont tenu jusqu\'au bout.';
 }
 
 function setupInfo(s) {
-  return `${s.count} joueur${s.count > 1 ? 's' : ''} : ${s.undercovers} Undercover${s.white ? ' + Mr. White' : ''}`;
+  return `${s.count} joueur${s.count > 1 ? 's' : ''} : ${s.undercovers} El Gharib${s.white ? ' + El Shabah' : ''}`;
 }
 
 // Carte du mot secret, cachée par défaut pour que les voisins ne la lisent pas
@@ -463,7 +461,7 @@ function wordCard(s) {
       <span class="word-label">Ton mot est caché</span>
       <span class="word-hint">Appuie pour le voir (cache ton écran)</span></button>`;
   return `<button id="word-card" class="word-card">${secret.white
-      ? `<span class="word-label">Tu es</span><span class="word">Mr. White</span>
+      ? `<span class="word-label">Tu es</span><span class="word">El Shabah</span>
          <span class="word-hint">Tu n'as pas de mot. Écoute les autres et bluffe !</span>`
       : `<span class="word-label">Ton mot</span><span class="word">${esc(secret.word)}</span>
          <span class="word-hint">Appuie pour le cacher</span>`}</button>`;
@@ -478,30 +476,26 @@ function deadList(s) {
 views.undercover = {
   setup: s => isHost()
     ? `<p class="big-prompt">Prêts à jouer ?</p>
-      <p class="hint">Les civils ont tous le même mot. L'Undercover a un mot proche, sans le savoir.
+      <p class="hint">Les civils ont tous le même mot. El Gharib a un mot proche, sans le savoir.
       Chacun décrit son mot à voix haute, puis on vote pour éliminer l'intrus.</p>
       <label class="toggle"><input id="opt-white" type="checkbox" ${s.white ? 'checked' : ''}>
-        <span>Avec Mr. White <small>(aucun mot, il doit bluffer)</small></span></label>
+        <span>Avec El Shabah <small>(aucun mot, il doit bluffer)</small></span></label>
       <p class="status">${setupInfo(s)}</p>
       <button id="uc-deal" class="btn btn-primary">Distribuer les mots</button>`
     : `<p class="waiting">L'hôte prépare la partie…</p><p class="status">${setupInfo(s)}</p>`,
 
-  describe: s => {
-    const current = s.order.find(o => o.id === s.speaker);
-    let action;
-    if (s.speaker === me) action = `<button id="uc-spoke" class="btn btn-primary">J'ai parlé</button>`;
-    else {
-      action = `<p class="status">C'est à <strong>${esc(current ? current.name : '…')}</strong> de décrire son mot.</p>`;
-      if (isHost()) action += `<button id="uc-spoke" class="btn btn-ghost">Passer au suivant</button>`;
-    }
-    const idx = s.order.findIndex(o => o.id === s.speaker);
-    return wordCard(s) +
-      `<p class="progress">Tour ${s.turn} · Descriptions</p>
-      <p class="hint">Chacun dit un mot ou une courte phrase à voix haute, dans cet ordre.</p>
-      <ol class="speak-order">${s.order.map((o, i) => `
-        <li class="${i < idx ? 'done' : ''} ${o.id === s.speaker ? 'current' : ''}">${esc(o.name)}${o.id === me ? ' (toi)' : ''}</li>`).join('')}
-      </ol>` + action + deadList(s);
-  },
+  // Ordre de parole tiré au sort, gardé pour les tours de descriptions ; l'hôte lance le vote
+  describe: s => wordCard(s) +
+    `<p class="progress">Manche ${s.turn} · Descriptions</p>
+    <p class="notice">Faites au moins ${s.minTurns} tours dans cet ordre avant de voter.</p>
+    <p class="hint">À chaque tour, chacun dit un mot ou une courte phrase à voix haute.</p>
+    <ol class="speak-order">${s.order.map(o => `
+      <li class="${o.id === me ? 'me' : ''}">${esc(o.name)}${o.id === me ? ' (toi)' : ''}</li>`).join('')}
+    </ol>` +
+    (isHost()
+      ? `<button id="uc-tovote" class="btn btn-primary">Passer au vote</button>`
+      : `<p class="status">L'hôte lance le vote quand les ${s.minTurns} tours sont faits.</p>`) +
+    deadList(s),
 
   vote: s => {
     const alive = s.alive.includes(me);
@@ -513,7 +507,7 @@ views.undercover = {
         <button class="choice ${voted && local.vote === c.id ? 'picked' : ''} ${voted && local.vote !== c.id ? 'dim' : ''}"
           data-id="${c.id}" ${voted ? 'disabled' : ''}>${esc(c.name)}</button>`).join('')}</div>`;
     return wordCard(s) +
-      `<p class="progress">Tour ${s.turn} · Vote</p>` +
+      `<p class="progress">Manche ${s.turn} · Vote</p>` +
       (s.notice ? `<p class="notice">${esc(s.notice)}</p>` : '') +
       body + waiting(s.voted, 'ont voté', s.alive) + deadList(s);
   },
@@ -522,7 +516,7 @@ views.undercover = {
     ? `<div class="elim-card"><p class="elim-name">Démasqué(e) !</p>
         <p class="elim-role">Dernière chance : devine le mot des civils pour gagner.</p></div>` +
       answerBox('Le mot des civils', 'Valider', 40)
-    : `<div class="elim-card"><p class="elim-name">${esc(s.eliminated.name)} était Mr. White !</p>
+    : `<div class="elim-card"><p class="elim-name">${esc(s.eliminated.name)} était El Shabah !</p>
         <p class="elim-role">Il tente de deviner le mot des civils…</p></div>`,
 
   reveal: s => {
@@ -538,8 +532,8 @@ views.undercover = {
     if (s.lastVotes) html += `<h3>Votes</h3><ul class="results">${s.lastVotes.map(v => `
       <li><div class="row"><span class="main">${esc(v.name)}</span><span class="count">${v.votes}</span></div></li>`).join('')}</ul>`;
     html += isHost()
-      ? `<button id="uc-next" class="btn btn-primary spaced">Tour suivant</button>`
-      : `<p class="waiting">L'hôte lance le tour suivant…</p>`;
+      ? `<button id="uc-next" class="btn btn-primary spaced">Manche suivante</button>`
+      : `<p class="waiting">L'hôte lance la manche suivante…</p>`;
     return html + deadList(s);
   },
 
@@ -550,8 +544,8 @@ views.undercover = {
     <div class="winner-card winner-${s.winner}"><p>${WINNER_LABEL[s.winner]}</p>
       <p class="winner-why">${endReason(s)}</p></div>
     <p class="words-line">Mot des civils : <strong>${esc(s.civilWord)}</strong><br>
-      Mot de l'Undercover : <strong>${esc(s.underWord)}</strong></p>
-    ${s.whiteGuess ? `<p class="status">Mr. White a proposé « ${esc(s.whiteGuess)} »</p>` : ''}
+      Mot d'El Gharib : <strong>${esc(s.underWord)}</strong></p>
+    ${s.whiteGuess ? `<p class="status">El Shabah a proposé « ${esc(s.whiteGuess)} »</p>` : ''}
     <h3>Les rôles</h3>
     <ul class="player-list">${s.roles.map(p => `
       <li class="${p.alive ? '' : 'out'}"><span class="pname">${esc(p.name)}${p.alive ? '' : ' <small>éliminé(e)</small>'}</span>
@@ -566,8 +560,8 @@ function bindUndercover(s) {
   if (opt) opt.onchange = () => socket.emit('undercover-option', { white: opt.checked });
   const deal = $('uc-deal');
   if (deal) deal.onclick = () => socket.emit('undercover-deal');
-  const spoke = $('uc-spoke');
-  if (spoke) spoke.onclick = () => socket.emit('undercover-spoke');
+  const toVote = $('uc-tovote');
+  if (toVote) toVote.onclick = () => socket.emit('undercover-tovote');
   const next = $('uc-next');
   if (next) next.onclick = () => socket.emit('undercover-next');
   if (s.phase === 'vote') {

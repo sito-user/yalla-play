@@ -299,9 +299,7 @@ body[data-game="bluff"] .expression { color: var(--ink); }
   border-bottom: 1px solid var(--line);
 }
 .speak-order li::before { content: counter(speak); width: 1.6em; font-weight: 800; color: var(--muted); }
-.speak-order li.done { color: var(--muted); text-decoration: line-through; }
-.speak-order li.current { font-weight: 800; background: var(--white); }
-.speak-order li.current::before { color: var(--ink); content: '▸'; }
+.speak-order li.me { font-weight: 700; }
 
 .notice {
   font-weight: 600;

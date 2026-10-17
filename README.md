@@ -6,7 +6,7 @@ Node.js + Express + Socket.io, tout en mémoire (pas de base de données), 100 %
 ## Les jeux
 - **Yalla, Traduis !** — série de N questions sur les expressions libanaises, réponses révélées à la fin, gage pour le dernier
 - **Yalla, Tourne !** — la bouteille qui tourne pour action ou vérité, avec un bouton « Donne-moi une idée »
-- **Undercover** — civils, Undercover et Mr. White (optionnel) : trouve qui n'a pas le même mot
+- **Chou Kelmtak ?** — civils, El Gharib (mot proche) et El Shabah (sans mot, optionnel) : au moins 3 tours de descriptions, puis on vote pour trouver qui n'a pas le même mot
 
 En pause (cachés du menu, code conservé) : **Yalla, Qui ?**, **Yalla Vite**, **Sa7 ou Fake**.
 Pour en réactiver un, retire son nom de `PAUSED_GAMES` en haut de `server.js`
