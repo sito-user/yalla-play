@@ -67,7 +67,7 @@ const clean = (s, max) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, m
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 function publicPlayers(room) {
-  return Object.values(room.players).map(p => ({ id: p.id, name: p.name, score: p.score }));
+  return Object.values(room.players).map(p => ({ id: p.id, name: p.name, score: p.score, connected: p.connected }));
 }
 
 function broadcastPlayers(room) {
@@ -92,8 +92,14 @@ function startTimer(room, seconds, onEnd) {
 }
 
 // Joueurs encore présents parmi ceux qui participaient au début du round
+// (un joueur déconnecté reste présent pendant le délai de reconnexion)
 function activeParticipants(room) {
   return room.round.participants.filter(id => room.players[id]);
+}
+
+// Ne garde que les joueurs connectés : on n'attend pas les réponses d'un absent
+function onlineOnly(room, ids) {
+  return ids.filter(id => room.players[id] && room.players[id].connected);
 }
 
 // ---------- Les 4 jeux ----------
@@ -120,7 +126,7 @@ const games = {
     },
     check(room) {
       const r = room.round;
-      const active = activeParticipants(room);
+      const active = onlineOnly(room, activeParticipants(room));
       if (r.phase !== 'vote') return;
       if (active.length && active.every(id => r.votes[id])) return this.finish(room);
       sendState(room);
@@ -161,7 +167,7 @@ const games = {
     check(room) {
       const r = room.round;
       if (r.phase !== 'answer') return;
-      const active = activeParticipants(room);
+      const active = onlineOnly(room, activeParticipants(room));
       if (active.length && active.every(id => id in r.answers)) return this.finish(room);
       sendState(room);
     },
@@ -227,7 +233,7 @@ const games = {
     },
     check(room) {
       const r = room.round;
-      const active = activeParticipants(room);
+      const active = onlineOnly(room, activeParticipants(room));
       if (r.phase === 'write') {
         if (active.length && active.every(id => r.lies[id])) return this.toVote(room);
         return sendState(room);
@@ -374,7 +380,7 @@ const games = {
 
     check(room) {
       const r = room.round;
-      const active = activeParticipants(room);
+      const active = onlineOnly(room, activeParticipants(room));
       if (r.phase === 'question') {
         if (r.closing) return;
         if (active.length && active.every(id => id in r.current.answers)) {
@@ -386,7 +392,7 @@ const games = {
         return sendState(room);
       }
       if (r.phase === 'gage-vote') {
-        const judges = r.judges.filter(id => room.players[id]);
+        const judges = onlineOnly(room, r.judges);
         const votes = judges.map(id => r.gageVotes[id]);
         if (!judges.length || !r.losers.some(id => room.players[id])) r.phase = 'results';
         else if (votes.includes(false)) { r.gageRefused = true; r.phase = 'results'; } // il faut l'accord de tous
@@ -397,7 +403,7 @@ const games = {
         return sendState(room);
       }
       if (r.phase === 'gage-write') {
-        const judges = r.judges.filter(id => room.players[id]);
+        const judges = onlineOnly(room, r.judges);
         if (judges.every(id => r.gages[id])) return this.drawGages(room);
         return sendState(room);
       }
@@ -462,7 +468,8 @@ const games = {
       if (r.circle.length < 2) return socket.emit('toast', 'Il faut au moins 2 joueurs pour faire tourner la bouteille.');
 
       // On ne tombe pas sur celui qui lance
-      const candidates = r.circle.filter(id => id !== socket.id);
+      const candidates = onlineOnly(room, r.circle).filter(id => id !== socket.id);
+      if (!candidates.length) return socket.emit('toast', 'Personne d\'autre n\'est connecté pour le moment.');
       const target = candidates[Math.floor(Math.random() * candidates.length)];
       const slice = 360 / r.circle.length;
       const targetAngle = r.circle.indexOf(target) * slice;
@@ -731,7 +738,7 @@ const games = {
         return sendState(room);
       }
       if (r.phase === 'vote') {
-        const voters = this.aliveNow(room);
+        const voters = onlineOnly(room, this.aliveNow(room));
         if (voters.length && voters.every(id => id in r.votes)) return this.tally(room);
         return sendState(room);
       }
@@ -789,21 +796,80 @@ function startRound(room, game) {
 }
 
 // ---------- Connexions ----------
+// Chaque joueur a un identifiant stable (id) et une clé secrète (key) gardée par son téléphone.
+// Si la connexion coupe (écran verrouillé, appli changée, page rechargée), il reste dans la partie
+// en « déconnecté » pendant RECONNECT_GRACE_MS et la retrouve tel quel en revenant.
+
+const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS) || 3 * 60 * 1000;
+
+const newToken = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+
+// Retire définitivement un joueur (délai écoulé). Si c'était l'hôte, le rôle passe au joueur
+// arrivé juste après lui ; s'il ne reste personne, la partie est supprimée.
+function removePlayer(room, id) {
+  if (!rooms[room.code] || !room.players[id]) return;
+  const order = Object.keys(room.players);
+  const wasHost = room.hostId === id;
+  delete room.players[id];
+  const left = Object.keys(room.players);
+  if (!left.length) {
+    clearTimer(room);
+    delete rooms[room.code];
+    return;
+  }
+  if (wasHost) {
+    const after = order.slice(order.indexOf(id) + 1).find(p => room.players[p]);
+    room.hostId = after || left[0];
+    io.to(room.hostId).emit('toast', "L'hôte est parti : c'est toi le nouvel hôte.");
+  }
+  broadcastPlayers(room);
+  if (room.round) games[room.round.game].check(room);
+}
+
+// Renvoie au joueur qui revient ce qu'il est seul à voir (ex. son mot secret)
+function resendPrivate(room, id) {
+  const r = room.round;
+  if (!r || r.game !== 'undercover' || !r.roles || !r.roles[id]) return;
+  const role = r.roles[id];
+  io.to(id).emit('undercover-secret', role === 'white' ? { white: true } : { word: role === 'civil' ? r.civilWord : r.underWord });
+}
 
 io.on('connection', socket => {
   let room = null;
+  let me = null; // le joueur lié à cette connexion
 
-  const isHost = () => room && room.hostId === socket.id;
+  // Ce que les jeux reçoivent à la place du socket : l'identifiant stable du joueur
+  const actor = { get id() { return me && me.id; }, emit: (...args) => socket.emit(...args) };
+  const isHost = () => room && me && room.hostId === me.id;
+
+  // Lie cette connexion à un joueur (nouveau ou qui revient)
+  function bind(r, player) {
+    room = r;
+    me = player;
+    clearTimeout(player.leaveTimer);
+    player.connected = true;
+    player.socketId = socket.id;
+    socket.join(room.code);
+    socket.join(player.id); // pour lui envoyer des messages privés
+    socket.emit('joined', { code: room.code, you: player.id, key: player.key, games: GAMES });
+  }
 
   function enter(r, name) {
-    room = r;
-    room.players[socket.id] = { id: socket.id, name, score: 0 };
-    socket.join(room.code);
+    const player = { id: newToken(), key: newToken(), name, score: 0, connected: true };
+    r.players[player.id] = player;
+    bind(r, player);
     const joinsGame = room.round && games[room.round.game].onJoin;
-    if (joinsGame) games[room.round.game].onJoin(room, socket.id);
-    socket.emit('joined', { code: room.code, you: socket.id, games: GAMES });
+    if (joinsGame) games[room.round.game].onJoin(room, player.id);
     broadcastPlayers(room);
     sendState(room, joinsGame ? undefined : socket); // tout le monde voit le nouveau venu autour de la bouteille
+  }
+
+  function comeBack(r, player) {
+    bind(r, player);
+    broadcastPlayers(room);
+    sendState(room, socket);
+    resendPrivate(room, player.id);
+    if (room.round) games[room.round.game].check(room);
   }
 
   socket.on('create-room', ({ name } = {}) => {
@@ -811,8 +877,10 @@ io.on('connection', socket => {
     const n = clean(name, 20);
     if (!n) return socket.emit('error-msg', 'Entre ton prénom pour créer une partie.');
     const code = makeCode();
-    rooms[code] = { code, hostId: socket.id, players: {}, round: null, roundCount: 0, used: {} };
+    rooms[code] = { code, hostId: null, players: {}, round: null, roundCount: 0, used: {} };
     enter(rooms[code], n);
+    rooms[code].hostId = me.id;
+    broadcastPlayers(room);
   });
 
   socket.on('join-room', ({ name, code } = {}) => {
@@ -822,10 +890,22 @@ io.on('connection', socket => {
     if (!n) return socket.emit('error-msg', 'Entre ton prénom.');
     const r = rooms[c];
     if (!r) return socket.emit('error-msg', `Aucune partie avec le code ${c || '…'}.`);
-    if (Object.values(r.players).some(p => same(p.name, n))) {
+    const existing = Object.values(r.players).find(p => same(p.name, n));
+    if (existing) {
+      // Même prénom qu'un joueur déconnecté : c'est sûrement lui qui revient (onglet fermé…)
+      if (!existing.connected) return comeBack(r, existing);
       return socket.emit('error-msg', 'Ce prénom est déjà pris dans cette partie.');
     }
     enter(r, n);
+  });
+
+  // Retour automatique après une coupure ou un rechargement de page
+  socket.on('resume', ({ code, key } = {}) => {
+    if (room) return;
+    const r = rooms[clean(code, 4).toUpperCase()];
+    const player = r && Object.values(r.players).find(p => p.key === key);
+    if (!player) return socket.emit('resume-failed');
+    comeBack(r, player);
   });
 
   socket.on('start-game', ({ game } = {}) => {
@@ -844,39 +924,38 @@ io.on('connection', socket => {
   });
 
   const forRound = (game, fn) => (data = {}) => {
-    if (room && room.round && room.round.game === game) fn(data);
+    if (me && room && room.round && room.round.game === game) fn(data);
   };
 
-  socket.on('whois-vote', forRound('whois', d => games.whois.vote(room, socket, d.targetId)));
-  socket.on('assoc-answer', forRound('assoc', d => games.assoc.answer(room, socket, d.text)));
-  socket.on('bluff-lie', forRound('bluff', d => games.bluff.lie(room, socket, d.text)));
-  socket.on('bluff-vote', forRound('bluff', d => games.bluff.vote(room, socket, d.optionId)));
-  socket.on('bottle-spin', forRound('bottle', () => games.bottle.spin(room, socket)));
-  socket.on('undercover-option', forRound('undercover', d => games.undercover.setOption(room, socket, d.white)));
-  socket.on('undercover-deal', forRound('undercover', () => games.undercover.deal(room, socket)));
-  socket.on('undercover-tovote', forRound('undercover', () => games.undercover.toVote(room, socket)));
-  socket.on('undercover-vote', forRound('undercover', d => games.undercover.vote(room, socket, d.targetId)));
-  socket.on('undercover-guess', forRound('undercover', d => games.undercover.whiteGuess(room, socket, d.text)));
-  socket.on('undercover-next', forRound('undercover', () => games.undercover.next(room, socket)));
-  socket.on('bottle-idea', forRound('bottle', () => games.bottle.idea(room, socket)));
-  socket.on('bottle-choose', forRound('bottle', d => games.bottle.choose(room, socket, d.choice)));
-  socket.on('traduis-config', forRound('traduis', d => games.traduis.config(room, socket, d.count)));
-  socket.on('traduis-answer', forRound('traduis', d => games.traduis.answer(room, socket, d.index)));
-  socket.on('gage-vote', forRound('traduis', d => games.traduis.gageVote(room, socket, d.yes)));
-  socket.on('gage-write', forRound('traduis', d => games.traduis.gageWrite(room, socket, d.text)));
+  socket.on('whois-vote', forRound('whois', d => games.whois.vote(room, actor, d.targetId)));
+  socket.on('assoc-answer', forRound('assoc', d => games.assoc.answer(room, actor, d.text)));
+  socket.on('bluff-lie', forRound('bluff', d => games.bluff.lie(room, actor, d.text)));
+  socket.on('bluff-vote', forRound('bluff', d => games.bluff.vote(room, actor, d.optionId)));
+  socket.on('bottle-spin', forRound('bottle', () => games.bottle.spin(room, actor)));
+  socket.on('bottle-idea', forRound('bottle', () => games.bottle.idea(room, actor)));
+  socket.on('bottle-choose', forRound('bottle', d => games.bottle.choose(room, actor, d.choice)));
+  socket.on('undercover-option', forRound('undercover', d => games.undercover.setOption(room, actor, d.white)));
+  socket.on('undercover-deal', forRound('undercover', () => games.undercover.deal(room, actor)));
+  socket.on('undercover-tovote', forRound('undercover', () => games.undercover.toVote(room, actor)));
+  socket.on('undercover-vote', forRound('undercover', d => games.undercover.vote(room, actor, d.targetId)));
+  socket.on('undercover-guess', forRound('undercover', d => games.undercover.whiteGuess(room, actor, d.text)));
+  socket.on('undercover-next', forRound('undercover', () => games.undercover.next(room, actor)));
+  socket.on('traduis-config', forRound('traduis', d => games.traduis.config(room, actor, d.count)));
+  socket.on('traduis-answer', forRound('traduis', d => games.traduis.answer(room, actor, d.index)));
+  socket.on('gage-vote', forRound('traduis', d => games.traduis.gageVote(room, actor, d.yes)));
+  socket.on('gage-write', forRound('traduis', d => games.traduis.gageWrite(room, actor, d.text)));
 
   socket.on('disconnect', () => {
-    if (!room) return;
-    if (isHost()) {
-      clearTimer(room);
-      io.to(room.code).emit('room-closed', "L'hôte a quitté la partie. La partie est terminée.");
-      io.in(room.code).socketsLeave(room.code);
-      delete rooms[room.code];
-      return;
-    }
-    delete room.players[socket.id];
-    broadcastPlayers(room);
-    if (room.round) games[room.round.game].check(room); // le round peut maintenant être complet
+    if (!room || !me || !room.players[me.id]) return;
+    if (me.socketId !== socket.id) return; // il s'est déjà reconnecté avec une autre connexion
+    const r = room;
+    const player = me;
+    player.connected = false;
+    broadcastPlayers(r);
+    if (r.round) games[r.round.game].check(r); // on n'attend plus ses réponses pendant son absence
+    player.leaveTimer = setTimeout(() => {
+      if (!player.connected) removePlayer(r, player.id);
+    }, RECONNECT_GRACE_MS);
   });
 });
 

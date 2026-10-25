@@ -96,8 +96,9 @@ $('btn-menu').onclick = () => socket.emit('back-to-menu');
 function renderPlayers() {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const html = sorted.map(p => `
-    <li class="${p.id === me ? 'me' : ''}">
+    <li class="${p.id === me ? 'me' : ''} ${p.connected === false ? 'offline' : ''}">
       <span class="pname">${esc(p.name)}</span>
+      ${p.connected === false ? '<span class="tag">déconnecté</span>' : ''}
       ${p.id === hostId ? '<span class="tag">hôte</span>' : ''}
       <span class="score">${p.score} pts</span>
     </li>`).join('');
@@ -109,8 +110,36 @@ function renderPlayers() {
 
 // ---------- Socket ----------
 
-socket.on('joined', ({ code, you, games }) => {
+// Le téléphone garde sa place (code + clé secrète) pour revenir dans la partie après une coupure,
+// un écran verrouillé ou un rechargement. sessionStorage : propre à chaque onglet.
+const SESSION_KEY = 'yalla-session';
+function loadSession() {
+  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch (e) { return null; }
+}
+function saveSession(data) {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch (e) {}
+}
+function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+
+// À chaque (re)connexion, on tente de reprendre sa place
+socket.on('connect', () => {
+  const saved = loadSession();
+  if (saved) socket.emit('resume', saved);
+});
+
+socket.on('resume-failed', () => {
+  clearSession();
+  if (me) {
+    toast("Cette partie n'existe plus. Retour à l'accueil…");
+    setTimeout(() => { location.href = location.pathname; }, 1500);
+  }
+});
+
+socket.on('joined', ({ code, you, key, games }) => {
   me = you;
+  saveSession({ code, key });
   $('room-code').textContent = code;
   // N'affiche que les jeux actifs (les autres sont en pause côté serveur), numérotés dans l'ordre
   let n = 0;
@@ -146,16 +175,9 @@ socket.on('undercover-secret', secret => {
 socket.on('toast', toast);
 socket.on('error-msg', toast);
 
-socket.on('room-closed', msg => {
-  alert(msg);
-  location.href = location.pathname;
-});
-
+// La connexion se rétablit toute seule ; on garde l'écran et on reprend sa place au retour
 socket.on('disconnect', () => {
-  if (me) {
-    toast("Connexion perdue. Retour à l'accueil…");
-    setTimeout(() => { location.href = location.pathname; }, 1500);
-  }
+  if (me) toast('Connexion perdue, reconnexion…');
 });
 
 // ---------- Chrono ----------
@@ -292,7 +314,7 @@ const views = {
 
     question: s => {
       const mine = local[`q${s.index}`];
-      const done = mine !== undefined;
+      const done = mine !== undefined || amIn(s.answered); // aussi après un rechargement de page
       return `<p class="progress">Question ${s.index} sur ${s.total}</p>
         <div class="prompt-card"><p class="hint">Ça veut dire quoi ?</p><p class="big-prompt expression">${esc(s.expression)}</p></div>
         <div class="choices">${s.choices.map((c, i) => `

@@ -166,6 +166,7 @@ input::placeholder { color: #A39A8F; }
 .player-list .me .pname { font-weight: 700; }
 .player-list .me .pname::after { content: ' (toi)'; color: var(--muted); font-weight: 400; }
 .player-list .tag { font-size: .8rem; color: var(--muted); }
+.player-list li.offline .pname { color: var(--muted); }
 .player-list .score { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: right; }
 
 /* ---------- En-tête de jeu ---------- */
